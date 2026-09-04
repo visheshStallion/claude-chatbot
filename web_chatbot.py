@@ -59,6 +59,22 @@ def index():
     return render_template('index.html')
 
 
+@app.route('/<path:subpath>')
+def catch_all(subpath):
+    """
+    Serve the chat page for any unmatched path.
+
+    A host that rewrites requests to an internal entrypoint can hand the WSGI
+    app a path other than "/", which would otherwise 404 the whole frontend.
+    API routes are matched before this one, so they still fail honestly.
+    """
+    # "api/index" is an entrypoint path some hosts rewrite to, not a real
+    # API route, so it renders the page rather than 404ing.
+    if subpath.startswith('api/') and subpath != 'api/index':
+        return jsonify({'error': 'Not found'}), 404
+    return render_template('index.html')
+
+
 @app.route('/api/chat', methods=['POST'])
 def api_chat():
     """

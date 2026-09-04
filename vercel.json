@@ -1,11 +1,14 @@
 {
-  "$schema": "https://openapi.vercel.sh/vercel.json",
-  "functions": {
-    "api/index.py": {
-      "includeFiles": "templates/**"
+  "builds": [
+    {
+      "src": "web_chatbot.py",
+      "use": "@vercel/python",
+      "config": {
+        "includeFiles": ["templates/**", "chatbot.py"]
+      }
     }
-  },
-  "rewrites": [
-    { "source": "/(.*)", "destination": "/api/index" }
+  ],
+  "routes": [
+    { "src": "/(.*)", "dest": "/web_chatbot.py" }
   ]
 }
