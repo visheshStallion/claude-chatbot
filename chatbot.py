@@ -15,6 +15,11 @@ DEFAULT_MODELS = {
     "anthropic": "claude-opus-5",
 }
 
+KEY_ENV_VARS = {
+    "groq": "GROQ_API_KEY",
+    "anthropic": "ANTHROPIC_API_KEY",
+}
+
 
 def create_chatbot():
     """Initialize and return a chatbot instance."""
@@ -28,6 +33,11 @@ class Chatbot:
         """
         Initialize the chatbot.
 
+        The API client is created lazily on first use, so importing this
+        module never fails just because a key is missing - important on
+        serverless hosts, where an import-time raise takes down the whole
+        function instead of returning a readable error.
+
         Args:
             model: Model to use. Defaults to the GROQ_MODEL / CLAUDE_MODEL
                 environment variable, then to the provider's default.
@@ -35,37 +45,38 @@ class Chatbot:
                 environment variable, then to "groq".
         """
         self.provider = (provider or os.getenv("PROVIDER", "groq")).lower()
-
-        if self.provider == "groq":
-            self._require_key("GROQ_API_KEY")
-            from groq import Groq
-
-            self.client = Groq()
-            self.model = model or os.getenv("GROQ_MODEL") or DEFAULT_MODELS["groq"]
-        elif self.provider == "anthropic":
-            self._require_key("ANTHROPIC_API_KEY")
-            from anthropic import Anthropic
-
-            self.client = Anthropic()
-            self.model = model or os.getenv("CLAUDE_MODEL") or DEFAULT_MODELS["anthropic"]
-        else:
+        if self.provider not in DEFAULT_MODELS:
             raise ValueError(
                 f"Unknown PROVIDER {self.provider!r}. Use 'groq' or 'anthropic'."
             )
 
+        env_model = os.getenv("GROQ_MODEL" if self.provider == "groq" else "CLAUDE_MODEL")
+        self.model = model or env_model or DEFAULT_MODELS[self.provider]
+
+        self._client = None
         self.conversation_history = []
         self.system_prompt = """You are a helpful, friendly, and knowledgeable AI assistant.
 You provide accurate information, engage in thoughtful conversation, and help users with their questions and tasks.
 You are honest about your limitations and always try to be helpful."""
 
-    @staticmethod
-    def _require_key(name: str):
-        """Fail early with a readable message if the API key is missing."""
-        if not os.getenv(name):
-            raise RuntimeError(
-                f"{name} is not set. Add it to a .env file in this directory "
-                f"(see .env.example) or export it in your shell."
-            )
+    @property
+    def client(self):
+        """Build the provider client on first use, not at import time."""
+        if self._client is None:
+            key_name = KEY_ENV_VARS[self.provider]
+            if not os.getenv(key_name):
+                raise RuntimeError(
+                    f"{key_name} is not set. Add it to a .env file in this "
+                    f"directory (see .env.example), export it in your shell, or "
+                    f"set it in your host's environment variables."
+                )
+            if self.provider == "groq":
+                from groq import Groq
+                self._client = Groq()
+            else:
+                from anthropic import Anthropic
+                self._client = Anthropic()
+        return self._client
 
     def set_system_prompt(self, prompt: str):
         """
@@ -76,9 +87,44 @@ You are honest about your limitations and always try to be helpful."""
         """
         self.system_prompt = prompt
 
+    def reply(self, messages) -> str:
+        """
+        Stateless: given a full message list, return the assistant's reply.
+
+        Nothing is stored on the instance, so this is safe to call from a
+        serverless handler where the caller owns the conversation.
+
+        Args:
+            messages: list of {"role": "user"|"assistant", "content": str}
+
+        Returns:
+            The assistant's reply text
+        """
+        if self.provider == "groq":
+            response = self.client.chat.completions.create(
+                model=self.model,
+                max_completion_tokens=8192,
+                messages=[
+                    {"role": "system", "content": self.system_prompt}
+                ] + list(messages),
+            )
+            return response.choices[0].message.content
+
+        response = self.client.messages.create(
+            model=self.model,
+            max_tokens=16000,
+            system=self.system_prompt,
+            messages=list(messages),
+        )
+        return next(
+            (block.text for block in response.content if block.type == "text"), ""
+        )
+
     def chat(self, user_message: str) -> str:
         """
-        Send a message to the model and get a response.
+        Send a message using this instance's own conversation history.
+
+        Used by the CLI, where one process owns one conversation.
 
         Args:
             user_message: The user's message
@@ -86,47 +132,19 @@ You are honest about your limitations and always try to be helpful."""
         Returns:
             The chatbot's response
         """
-        # Add user message to conversation history
         self.conversation_history.append({
             "role": "user",
             "content": user_message
         })
 
-        if self.provider == "groq":
-            assistant_message = self._chat_groq()
-        else:
-            assistant_message = self._chat_anthropic()
+        assistant_message = self.reply(self.conversation_history)
 
-        # Add assistant response to conversation history
         self.conversation_history.append({
             "role": "assistant",
             "content": assistant_message
         })
 
         return assistant_message
-
-    def _chat_groq(self) -> str:
-        """Send the conversation to Groq's OpenAI-compatible chat endpoint."""
-        response = self.client.chat.completions.create(
-            model=self.model,
-            max_completion_tokens=8192,
-            messages=[
-                {"role": "system", "content": self.system_prompt}
-            ] + self.conversation_history,
-        )
-        return response.choices[0].message.content
-
-    def _chat_anthropic(self) -> str:
-        """Send the conversation to the Anthropic Messages API."""
-        response = self.client.messages.create(
-            model=self.model,
-            max_tokens=16000,
-            system=self.system_prompt,
-            messages=self.conversation_history,
-        )
-        return next(
-            (block.text for block in response.content if block.type == "text"), ""
-        )
 
     def clear_history(self):
         """Clear the conversation history."""
