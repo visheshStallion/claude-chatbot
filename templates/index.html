@@ -223,6 +223,26 @@
                 font-size: 12px;
             }
         }
+
+        /* CONCIERGE */
+#fab{position:fixed;right:26px;bottom:26px;z-index:250;background:var(--navy);color:#fff;border:none;padding:15px 22px;font-family:'Libre Franklin',sans-serif;font-weight:600;font-size:11.5px;letter-spacing:1.6px;text-transform:uppercase;cursor:pointer;box-shadow:0 12px 30px rgba(8,18,39,.32)}
+#fab:hover{background:var(--gold);color:var(--deep)}
+
+#bot{position:fixed;right:26px;bottom:92px;z-index:251;width:min(384px,calc(100vw - 34px));background:#fff;box-shadow:0 26px 66px rgba(8,18,39,.36);display:none;flex-direction:column;overflow:hidden;border:1px solid var(--line)}
+#bot.open{display:flex}
+#bot header{background:var(--navy);color:#fff;padding:17px 21px;display:flex;justify-content:space-between;align-items:center}
+#bot header b{font-family:'Source Serif 4',serif;font-size:16px;font-weight:600}
+#bot header i{font-style:normal;display:block;font-size:9px;color:var(--gold-l);letter-spacing:2px;margin-top:2px}
+#bot header button{background:none;border:none;color:#8891a8;font-size:21px;cursor:pointer;line-height:1}
+
+#chat{padding:19px;max-height:352px;overflow-y:auto;display:flex;flex-direction:column;gap:9px;background:var(--soft)}
+.msg{max-width:88%;padding:11px 14px;font-size:13.5px;line-height:1.55}
+.msg.bot{background:#fff;border:1px solid var(--line)}
+.msg.me{background:var(--navy);color:#fff;align-self:flex-end}
+
+#cin{display:flex;border-top:1px solid var(--line)}
+#cin input{flex:1;border:none;padding:14px 16px;font-size:13.5px;outline:none;font-family:'Libre Franklin',sans-serif}
+#cin button{background:var(--navy);border:none;padding:0 20px;font-weight:700;cursor:pointer;color:#fff;font-size:10.5px;letter-spacing:1.4px;text-transform:uppercase;font-family:'Libre Franklin',sans-serif}
     </style>
 </head>
 <body>
