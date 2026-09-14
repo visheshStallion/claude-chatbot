@@ -343,6 +343,102 @@
             margin-bottom: 10px;
 
         }
+
+        .lead-card-content {
+
+            max-width: 85%;
+
+            display: flex;
+
+            flex-direction: column;
+
+            gap: 8px;
+
+        }
+
+        .lead-field {
+
+            display: flex;
+
+            flex-direction: column;
+
+            gap: 3px;
+
+        }
+
+        .lead-field label {
+
+            font-size: 11px;
+
+            font-weight: 600;
+
+            color: #666;
+
+            text-transform: uppercase;
+
+            letter-spacing: 0.5px;
+
+        }
+
+        .lead-input {
+
+            padding: 8px 10px;
+
+            border: 1px solid #ddd;
+
+            border-radius: 6px;
+
+            font-size: 13px;
+
+            font-family: inherit;
+
+            resize: vertical;
+
+        }
+
+        .lead-status {
+
+            font-size: 12.5px;
+
+            color: #555;
+
+            min-height: 16px;
+
+        }
+
+        .lead-actions {
+
+            display: flex;
+
+            gap: 8px;
+
+        }
+
+        .lead-actions button {
+
+            border-radius: 20px;
+
+            background: #667eea;
+
+            color: white;
+
+        }
+
+        .lead-actions button:last-child {
+
+            background: #ddd;
+
+            color: #333;
+
+        }
+
+        .lead-actions button:disabled {
+
+            opacity: 0.6;
+
+            cursor: default;
+
+        }
  
         @media (max-width: 600px) {
 
@@ -506,6 +602,146 @@
 
         }
  
+        // The model ends a reply with a fenced ```lead block once it has
+        // gathered all five fields and the visitor has confirmed - see the
+        // system prompt in chatbot.py. Pull it out so it renders as a
+        // review-and-send card instead of raw JSON in the chat bubble.
+        const LEAD_FIELDS = [
+            ['company', 'Company'],
+            ['contact_name', 'Contact name'],
+            ['contact', 'Email or phone'],
+            ['division', 'Division'],
+            ['message', 'Enquiry'],
+        ];
+
+        function extractLeadBlock(text) {
+            const match = text.match(/```lead\s*([\s\S]*?)```/);
+            if (!match) return { text, lead: null };
+
+            const cleanText = (text.slice(0, match.index) + text.slice(match.index + match[0].length)).trim();
+            let lead = null;
+            try {
+                const parsed = JSON.parse(match[1]);
+                const complete = LEAD_FIELDS.every(
+                    ([key]) => typeof parsed[key] === 'string' && parsed[key].trim().length > 0
+                );
+                if (complete) lead = parsed;
+            } catch (error) {
+                lead = null;
+            }
+
+            return { text: cleanText || text, lead };
+        }
+
+        function addLeadCard(lead) {
+            clearEmptyState();
+
+            const wrap = document.createElement('div');
+            wrap.className = 'message assistant';
+
+            const card = document.createElement('div');
+            card.className = 'message-content lead-card-content';
+
+            const title = document.createElement('strong');
+            title.textContent = 'Review your enquiry';
+            card.appendChild(title);
+
+            const inputs = {};
+            LEAD_FIELDS.forEach(([key, label]) => {
+                const fieldWrap = document.createElement('div');
+                fieldWrap.className = 'lead-field';
+
+                const labelEl = document.createElement('label');
+                labelEl.textContent = label;
+                fieldWrap.appendChild(labelEl);
+
+                const input = key === 'message' ? document.createElement('textarea') : document.createElement('input');
+                if (key !== 'message') input.type = 'text';
+                else input.rows = 3;
+                input.className = 'lead-input';
+                input.value = lead[key];
+                fieldWrap.appendChild(input);
+                inputs[key] = input;
+
+                card.appendChild(fieldWrap);
+            });
+
+            // Honeypot: invisible to a real visitor and left blank. A bot
+            // that fills every input on the page fills this too.
+            const honeypot = document.createElement('input');
+            honeypot.type = 'text';
+            honeypot.autocomplete = 'off';
+            honeypot.tabIndex = -1;
+            honeypot.setAttribute('aria-hidden', 'true');
+            honeypot.style.cssText = 'position:absolute;left:-9999px;width:1px;height:1px;opacity:0';
+            card.appendChild(honeypot);
+
+            const status = document.createElement('div');
+            status.className = 'lead-status';
+            card.appendChild(status);
+
+            const actions = document.createElement('div');
+            actions.className = 'lead-actions';
+
+            const sendBtn = document.createElement('button');
+            sendBtn.type = 'button';
+            sendBtn.textContent = 'Send Enquiry';
+
+            const cancelBtn = document.createElement('button');
+            cancelBtn.type = 'button';
+            cancelBtn.textContent = 'Cancel';
+            cancelBtn.onclick = () => wrap.remove();
+
+            sendBtn.onclick = async () => {
+                const payload = { website: honeypot.value };
+                let missing = false;
+                LEAD_FIELDS.forEach(([key]) => {
+                    const value = inputs[key].value.trim();
+                    if (!value) missing = true;
+                    payload[key] = value;
+                });
+                if (missing) {
+                    status.textContent = 'Please fill in every field before sending.';
+                    return;
+                }
+
+                sendBtn.disabled = true;
+                cancelBtn.disabled = true;
+                status.textContent = 'Sending…';
+
+                try {
+                    const response = await fetch('/api/lead', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload),
+                    });
+                    const result = await response.json();
+
+                    if (response.ok) {
+                        status.textContent = 'Sent — our partnerships team will be in touch.';
+                        Object.values(inputs).forEach(el => { el.disabled = true; });
+                        actions.remove();
+                    } else {
+                        status.textContent = result.error || 'Could not send. Please use /contact-us/ instead.';
+                        sendBtn.disabled = false;
+                        cancelBtn.disabled = false;
+                    }
+                } catch (error) {
+                    status.textContent = 'Could not send. Please use /contact-us/ instead.';
+                    sendBtn.disabled = false;
+                    cancelBtn.disabled = false;
+                }
+            };
+
+            actions.appendChild(sendBtn);
+            actions.appendChild(cancelBtn);
+            card.appendChild(actions);
+
+            wrap.appendChild(card);
+            chatContainer.appendChild(wrap);
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+        }
+
         async function sendMessage() {
 
             const message = messageInput.value.trim();
@@ -552,7 +788,11 @@
  
                 if (response.ok) {
 
-                    addMessage(data.response, false);
+                    const { text: displayText, lead } = extractLeadBlock(data.response);
+
+                    addMessage(displayText, false);
+
+                    if (lead) addLeadCard(lead);
 
                     // Only record the exchange once the server accepted it,
 
@@ -661,7 +901,13 @@
 
                     conversationHistory.forEach(msg => {
 
-                        addMessage(msg.content, msg.role === 'user');
+                        // A restored assistant turn may carry a ```lead block from
+                        // a prior session; the card itself isn't restored (it may
+                        // already have been sent, edited, or cancelled), but the
+                        // raw JSON shouldn't leak into the bubble either.
+                        const content = msg.role === 'user' ? msg.content : extractLeadBlock(msg.content).text;
+
+                        addMessage(content, msg.role === 'user');
 
                     });
 

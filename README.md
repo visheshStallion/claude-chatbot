@@ -55,3 +55,17 @@ The server is stateless — each `/api/chat` call carries the history it wants
 continued, and the browser keeps that history in `localStorage`. Serverless
 instances are concurrent and recycled, so a server-side history would be shared
 between unrelated visitors and lost without warning.
+
+### Partnership enquiries (`/api/lead`)
+
+When a visitor asks to submit a partnership enquiry in chat, the system
+prompt has the model gather company, contact name, contact email/phone,
+division, and a short message, then end its reply with a fenced ` ```lead `
+JSON block once the visitor confirms. The frontend turns that block into a
+review-and-send card — the model never sends anything itself, and never
+claims an enquiry was received.
+
+Sending requires `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, and
+`LEAD_EMAIL_TO` in `.env` (see `.env.example`). Without them, `/api/lead`
+returns a `502` and the card tells the visitor to use `/contact-us/` instead
+— the rest of the app is unaffected.
