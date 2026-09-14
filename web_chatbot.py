@@ -8,6 +8,9 @@ module-level history would be shared between unrelated visitors.
 """
 
 import os
+import re
+import smtplib
+from email.message import EmailMessage
 
 from dotenv import load_dotenv
 from flask import Flask, jsonify, render_template, request
@@ -31,6 +34,46 @@ bot = Chatbot()
 # unbounded history into the model.
 MAX_HISTORY_MESSAGES = 40
 MAX_MESSAGE_CHARS = 20000
+
+# Fields the chatbot is told (in chatbot.py's system prompt) to gather before
+# it offers to send a partnership enquiry, in the order they're emailed.
+LEAD_FIELDS = (
+    ("company", "Company"),
+    ("contact_name", "Contact name"),
+    ("contact", "Email or phone"),
+    ("division", "Division"),
+    ("message", "Enquiry"),
+)
+LEAD_FIELD_MAX_CHARS = 2000
+_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+_PHONE_RE = re.compile(r"^[\d\s+()-]{6,20}$")
+
+
+def send_lead_email(fields):
+    """
+    Email a partnership enquiry gathered in chat. Raises on any failure -
+    missing SMTP config included - so the caller can report it rather than
+    silently drop the enquiry.
+    """
+    host = os.environ["SMTP_HOST"]
+    port = int(os.getenv("SMTP_PORT", "587"))
+    user = os.environ["SMTP_USER"]
+    password = os.environ["SMTP_PASSWORD"]
+    sender = os.getenv("SMTP_FROM", user)
+    recipient = os.environ["LEAD_EMAIL_TO"]
+
+    msg = EmailMessage()
+    msg["Subject"] = f"Stallion Concierge enquiry - {fields['company']}"
+    msg["From"] = sender
+    msg["To"] = recipient
+    msg.set_content(
+        "\n".join(f"{label}: {fields[key]}" for key, label in LEAD_FIELDS)
+    )
+
+    with smtplib.SMTP(host, port, timeout=10) as smtp:
+        smtp.starttls()
+        smtp.login(user, password)
+        smtp.send_message(msg)
 
 
 def clean_history(raw):
@@ -104,6 +147,44 @@ def api_chat():
     except Exception as e:
         app.logger.exception("chat request failed")
         return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/lead', methods=['POST'])
+def api_lead():
+    """
+    Deliver a partnership/business enquiry the chatbot gathered in chat.
+
+    Expected JSON body: {"company", "contact_name", "contact", "division",
+    "message", "website"}. "website" is a honeypot: it's never shown to a
+    real visitor, so a non-empty value means a bot filled in every input.
+    """
+    data = request.get_json(silent=True) or {}
+
+    if str(data.get('website', '')).strip():
+        # Pretend success so a bot doesn't learn to leave it blank; nothing
+        # is actually sent.
+        return jsonify({'status': 'ok'}), 200
+
+    fields = {}
+    for key, _label in LEAD_FIELDS:
+        value = str(data.get(key, '')).strip()
+        if not value:
+            return jsonify({'error': f'{key.replace("_", " ")} is required'}), 400
+        fields[key] = value[:LEAD_FIELD_MAX_CHARS]
+
+    contact = fields['contact']
+    if not (_EMAIL_RE.match(contact) or _PHONE_RE.match(contact)):
+        return jsonify({'error': 'contact must be an email address or phone number'}), 400
+
+    try:
+        send_lead_email(fields)
+    except Exception:
+        app.logger.exception("lead email failed")
+        return jsonify({
+            'error': 'Could not send the enquiry. Please use /contact-us/ instead.',
+        }), 502
+
+    return jsonify({'status': 'ok'}), 200
 
 
 @app.route('/api/health', methods=['GET'])
