@@ -173,6 +173,18 @@
             color: #333;
 
         }
+
+        .message-content a {
+
+            color: #667eea;
+
+        }
+
+        .message.user .message-content a {
+
+            color: white;
+
+        }
  
         .typing-indicator {
 
@@ -549,6 +561,38 @@
 
         }
  
+        // Turns "[text](url)" into a clickable link, everything else stays
+        // as plain text via createTextNode - so there's no HTML injection
+        // surface, and only http(s) or root-relative URLs are ever made
+        // clickable (a "javascript:" or other scheme just renders as text).
+        const MARKDOWN_LINK_RE = /\[([^\]]+)\]\((https?:\/\/[^\s()]+|\/[^\s()]*)\)/g;
+
+        function renderMessageContent(text) {
+            const el = document.createElement('div');
+            el.className = 'message-content';
+
+            let lastIndex = 0;
+            MARKDOWN_LINK_RE.lastIndex = 0;
+            let match;
+            while ((match = MARKDOWN_LINK_RE.exec(text)) !== null) {
+                if (match.index > lastIndex) {
+                    el.appendChild(document.createTextNode(text.slice(lastIndex, match.index)));
+                }
+                const link = document.createElement('a');
+                link.href = match[2];
+                link.textContent = match[1];
+                link.target = '_blank';
+                link.rel = 'noopener noreferrer';
+                el.appendChild(link);
+                lastIndex = MARKDOWN_LINK_RE.lastIndex;
+            }
+            if (lastIndex < text.length) {
+                el.appendChild(document.createTextNode(text.slice(lastIndex)));
+            }
+
+            return el;
+        }
+
         function addMessage(content, isUser) {
 
             clearEmptyState();
@@ -557,7 +601,7 @@
 
             messageDiv.className = `message ${isUser ? 'user' : 'assistant'}`;
 
-            messageDiv.innerHTML = `<div class="message-content">${escapeHtml(content)}</div>`;
+            messageDiv.appendChild(renderMessageContent(content));
 
             chatContainer.appendChild(messageDiv);
 
@@ -854,16 +898,6 @@
             }
 
         });
- 
-        function escapeHtml(text) {
-
-            const div = document.createElement('div');
-
-            div.textContent = text;
-
-            return div.innerHTML;
-
-        }
  
         // The conversation lives in the browser: the server is stateless, so
 
