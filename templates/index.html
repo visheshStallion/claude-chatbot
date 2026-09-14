@@ -185,6 +185,32 @@
             color: white;
 
         }
+
+        .message-content > * {
+
+            margin-top: 6px;
+
+        }
+
+        .message-content > *:first-child {
+
+            margin-top: 0;
+
+        }
+
+        .message-content ul {
+
+            margin: 0;
+
+            padding-left: 20px;
+
+        }
+
+        .message-content li {
+
+            margin: 2px 0;
+
+        }
  
         .typing-indicator {
 
@@ -561,34 +587,66 @@
 
         }
  
-        // Turns "[text](url)" into a clickable link, everything else stays
-        // as plain text via createTextNode - so there's no HTML injection
-        // surface, and only http(s) or root-relative URLs are ever made
-        // clickable (a "javascript:" or other scheme just renders as text).
-        const MARKDOWN_LINK_RE = /\[([^\]]+)\]\((https?:\/\/[^\s()]+|\/[^\s()]*)\)/g;
+        // Renders a small, safe subset of Markdown: "**bold**", "[text](url)"
+        // links, and lines starting with "* " as a bullet list. Every other
+        // character reaches the page via createTextNode, never innerHTML, so
+        // there's no HTML injection surface - and only http(s) or
+        // root-relative URLs are ever turned into a clickable <a> (a
+        // "javascript:" or other scheme is left as plain text).
+        const INLINE_MARKDOWN_RE = /\*\*([^*]+)\*\*|\[([^\]]+)\]\((https?:\/\/[^\s()]+|\/[^\s()]*)\)/g;
+
+        function appendInline(container, text) {
+            let lastIndex = 0;
+            INLINE_MARKDOWN_RE.lastIndex = 0;
+            let match;
+            while ((match = INLINE_MARKDOWN_RE.exec(text)) !== null) {
+                if (match.index > lastIndex) {
+                    container.appendChild(document.createTextNode(text.slice(lastIndex, match.index)));
+                }
+                if (match[1] !== undefined) {
+                    const strong = document.createElement('strong');
+                    strong.textContent = match[1];
+                    container.appendChild(strong);
+                } else {
+                    const link = document.createElement('a');
+                    link.href = match[3];
+                    link.textContent = match[2];
+                    link.target = '_blank';
+                    link.rel = 'noopener noreferrer';
+                    container.appendChild(link);
+                }
+                lastIndex = INLINE_MARKDOWN_RE.lastIndex;
+            }
+            if (lastIndex < text.length) {
+                container.appendChild(document.createTextNode(text.slice(lastIndex)));
+            }
+        }
 
         function renderMessageContent(text) {
             const el = document.createElement('div');
             el.className = 'message-content';
 
-            let lastIndex = 0;
-            MARKDOWN_LINK_RE.lastIndex = 0;
-            let match;
-            while ((match = MARKDOWN_LINK_RE.exec(text)) !== null) {
-                if (match.index > lastIndex) {
-                    el.appendChild(document.createTextNode(text.slice(lastIndex, match.index)));
+            let list = null;
+            text.split('\n').forEach(line => {
+                const bullet = line.match(/^\s*[*-]\s+(.*)$/);
+                if (bullet) {
+                    if (!list) {
+                        list = document.createElement('ul');
+                        el.appendChild(list);
+                    }
+                    const li = document.createElement('li');
+                    appendInline(li, bullet[1]);
+                    list.appendChild(li);
+                    return;
                 }
-                const link = document.createElement('a');
-                link.href = match[2];
-                link.textContent = match[1];
-                link.target = '_blank';
-                link.rel = 'noopener noreferrer';
-                el.appendChild(link);
-                lastIndex = MARKDOWN_LINK_RE.lastIndex;
-            }
-            if (lastIndex < text.length) {
-                el.appendChild(document.createTextNode(text.slice(lastIndex)));
-            }
+
+                list = null;
+                if (line.length === 0) return;
+
+                const p = document.createElement('div');
+                appendInline(p, line);
+                el.appendChild(p);
+            });
 
             return el;
         }
